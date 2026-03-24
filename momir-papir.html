@@ -304,6 +304,840 @@
   /* ── Peek overlay ── */
   .peek-overlay {
     position:fixed; inset:0; z-index:999; background:var(--peek-bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px;
+    animation:fadeUp .2s ease;
+  }
+  .peek-overlay img {
+    max-width:340px; width:100%; border-radius:14px;
+    box-shadow:0 12px 48px rgba(0,0,0,.5); pointer-events:none;
+    transition:transform .4s ease;
+  }
+  .peek-overlay img.flipping { transform:rotateY(90deg); }
+  .peek-controls {
+    display:flex; gap:10px; margin-top:16px;
+  }
+  .peek-ctrl-btn {
+    padding:10px 24px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.1); color:#fff; font-size:15px;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:6px;
+  }
+  .peek-ctrl-btn:hover { background:rgba(255,255,255,.2); }
+  .peek-ctrl-btn:active { transform:scale(.95); }
+  .dfc-badge {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:20px; height:20px; border-radius:4px; font-size:11px;
+    background:var(--accent-bg); border:1px solid var(--accent-border); color:var(--accent);
+    flex-shrink:0; margin-left:2px;
+  }
+
+  /* ══════════ PRINT ══════════ */
+  #print-zone { display:none; }
+
+  @media print {
+    * {
+      background: transparent !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+    }
+
+    html,body {
+      background:#fff!important;
+      color:#000!important;
+      margin:0!important;
+      padding:0!important;
+      min-height:0!important;
+      overflow:visible!important;
+      width:100%!important;
+    }
+
+    body::before { display:none!important; }
+
+    .app,
+    .summon-bar {
+      display:none!important;
+    }
+
+    #print-zone {
+      display:block!important;
+      margin:0!important;
+      padding:0!important;
+      overflow:visible!important;
+      width:100%!important;
+    }
+
+    #print-zone .r-img {
+      filter:none!important;
+      -webkit-filter:none!important;
+    }
+
+    .receipt {
+      width:100%;
+      margin:0 0 2mm 0!important;
+      padding:0!important;
+      text-align:center;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .receipt:last-child {
+      margin-bottom:0!important;
+    }
+  }
+
+  .receipt {
+    width:100%;
+    margin:0 0 2mm 0;
+    padding:0;
+    text-align:center;
+  }
+  .receipt .r-img {
+    display:block; margin:0 auto; padding:0; border-radius:0;
+    width:100%; max-width:63mm; height:auto;
+    image-rendering:pixelated;
+  }
+  .receipt .r-sep { margin:2mm auto 0; width:100%; max-width:63mm; border-top:3px dashed #000; }
+</style>
+</head>
+<body>
+
+<div id="print-zone"></div>
+
+<div class="app">
+
+  <!-- ═══════════════════ HOME ═══════════════════ -->
+  <div id="s-home" class="screen active">
+    <div class="header">
+      <div class="header-title">Momir Papir</div>
+      <div class="header-actions">
+        <div id="nav-home"></div>
+        <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme"></button>
+      </div>
+    </div>
+
+    <div class="card-frame" id="momir-frame">
+      <div style="color:var(--text-faint);font-size:15px;padding:48px 0;">
+        <span class="spinner"></span>
+      </div>
+    </div>
+
+    <div class="btn-row" style="flex-direction:column;gap:10px;padding:24px 0;">
+      <button class="btn btn-primary" style="width:100%" onclick="go('play')">Start Game</button>
+      <div class="emblem-row">
+        <button class="btn btn-secondary" style="flex:1" onclick="printEmblems()">Print Emblems</button>
+        <div class="copies-stepper">
+          <button class="stepper-btn" onclick="adjustCopies(-1)">−</button>
+          <span class="stepper-val" id="copies-val">1</span>
+          <button class="stepper-btn" onclick="adjustCopies(1)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="rules-text">
+      Each player starts with <strong>24 life</strong> and a 60-card deck of basic lands.
+      Once per turn, as a sorcery: pay <strong>{X}</strong>, discard a card, and create a token copy of a random creature with mana value X.
+    </div>
+  </div>
+
+  <!-- ═══════════════════ PLAY ═══════════════════ -->
+  <div id="s-play" class="screen">
+    <div class="header">
+      <div class="header-title">Momir Papir</div>
+      <div class="header-actions">
+        <button class="badge-btn" id="log-btn" onclick="go('log')" style="display:none;">
+          Battlefield <span class="badge-count" id="log-count">0</span>
+        </button>
+        <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme"></button>
+        <button class="icon-btn" onclick="go('home')" title="Back to setup" style="font-size:18px;">✕</button>
+      </div>
+    </div>
+
+    <div class="play-body">
+      <div class="cmc-section">
+        <div class="section-label">Mana Value</div>
+        <div class="cmc-grid" id="cmc-grid"></div>
+        <div class="cmc-more-toggle" id="cmc-more-toggle" onclick="toggleHighCMC()">
+          <span>9 – 16</span>
+          <span class="arrow">▾</span>
+        </div>
+        <div class="cmc-high" id="cmc-high"></div>
+      </div>
+
+      <div id="status-area"></div>
+    </div>
+
+    <div class="summon-bar" id="summon-bar" style="display:none;">
+      <button id="summon-btn" class="btn btn-primary" onclick="summon()"     background:var(--border); transition:background var(--t);
+  }
+  .header-title {
+    font-family:'Cinzel',serif; font-size:14px; font-weight:700;
+    color:var(--text-dim); letter-spacing:5px; text-transform:uppercase; transition:color var(--t);
+  }
+  .header-actions { display:flex; gap:8px; align-items:center; }
+
+  /* ── Icon buttons ── */
+  .icon-btn {
+    width:36px; height:36px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-dim); font-size:15px;
+    cursor:pointer; transition:all .15s; display:flex; align-items:center; justify-content:center;
+  }
+  .icon-btn:hover { border-color:var(--border-hover); color:var(--text); background:var(--surface2); }
+  .icon-btn:active { transform:scale(.95); }
+
+  /* ── Badge button (e.g. Battlefield) ── */
+  .badge-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 14px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-mid); font-size:13px;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    cursor:pointer; transition:all .15s; white-space:nowrap;
+  }
+  .badge-btn:hover { border-color:var(--border-hover); color:var(--text); }
+  .badge-btn:active { transform:scale(.97); }
+  .badge-btn .badge-count {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:20px; height:20px; border-radius:10px; padding:0 6px;
+    background:var(--accent); color:var(--accent-text);
+    font-family:'Cinzel',serif; font-size:10px; font-weight:700;
+  }
+
+  /* ── Card Frame ── */
+  .card-frame { text-align:center; padding:24px 0 16px; }
+  .card-frame img {
+    width:100%; max-width:280px; border-radius:14px;
+    box-shadow:0 12px 40px var(--card-shadow), 0 2px 8px var(--card-shadow);
+    transition:box-shadow var(--t);
+  }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-family:'Cinzel',serif; font-size:11px; font-weight:700;
+    color:var(--text-faint); letter-spacing:3px; text-transform:uppercase;
+    padding:4px 0 12px; transition:color var(--t);
+  }
+
+  /* ── Primary / Ghost buttons ── */
+  .btn {
+    cursor:pointer; border:none; outline:none; font-family:'Cinzel',serif;
+    font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+    padding:14px 28px; border-radius:var(--radius); font-size:15px; transition:all .2s;
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn:active:not(:disabled) { transform:scale(.97); }
+  .btn:disabled { opacity:.3; cursor:not-allowed; }
+  .btn-primary {
+    background:var(--accent); color:var(--accent-text);
+    box-shadow:0 2px 16px var(--accent-glow), 0 1px 3px rgba(0,0,0,.2);
+  }
+  .btn-primary:hover:not(:disabled) { filter:brightness(1.1); box-shadow:0 4px 24px var(--accent-glow); }
+  .btn-secondary {
+    background:var(--surface); color:var(--text-mid); border:1px solid var(--border);
+    box-shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  .btn-secondary:hover:not(:disabled) { color:var(--text); border-color:var(--border-hover); background:var(--surface2); }
+  .btn-ghost { background:none; color:var(--text-dim); padding:10px 16px; letter-spacing:1px; font-size:13px; }
+  .btn-ghost:hover { color:var(--text); }
+  .btn-row { display:flex; gap:10px; justify-content:center; padding:20px 0; }
+  .emblem-row { display:flex; gap:8px; align-items:stretch; }
+  .copies-stepper {
+    display:flex; align-items:center; gap:0; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--surface); overflow:hidden; flex-shrink:0;
+  }
+  .stepper-btn {
+    width:40px; height:100%; border:none; background:none; color:var(--text-mid);
+    font-size:20px; font-weight:700; cursor:pointer; transition:all .15s;
+    display:flex; align-items:center; justify-content:center; font-family:'Cinzel',serif;
+  }
+  .stepper-btn:active { background:var(--surface2); transform:scale(.93); }
+  .stepper-btn:hover { color:var(--text); }
+  .stepper-val {
+    width:32px; text-align:center; font-family:'Cinzel',serif; font-size:16px;
+    font-weight:700; color:var(--accent); user-select:none;
+  }
+
+  /* ── Rules ── */
+  .rules-text {
+    color:var(--text-dim); font-size:15px; line-height:1.7; text-align:center;
+    padding:16px 12px; transition:color var(--t);
+  }
+  .rules-text strong { color:var(--text-mid); font-weight:600; }
+
+  /* ══════════════════════════════════════════
+     PLAY SCREEN
+  ══════════════════════════════════════════ */
+  .play-body { flex:1; padding-top:16px; padding-bottom:140px; }
+
+  /* CMC Grid */
+  .cmc-section { padding:8px 0 0; }
+  .cmc-grid {
+    display:grid; grid-template-columns:repeat(5,1fr); gap:8px;
+    padding:0 4px;
+  }
+  .cmc {
+    aspect-ratio:1; border-radius:var(--radius); border:1.5px solid var(--border);
+    background:var(--surface); color:var(--text-mid);
+    font-family:'Cinzel',serif; font-size:18px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .15s; user-select:none;
+    -webkit-user-select:none; position:relative;
+  }
+  .cmc:active { transform:scale(.93); }
+  .cmc:hover { border-color:var(--border-hover); color:var(--text); }
+  .cmc.on {
+    border-color:var(--accent); color:var(--accent);
+    background:var(--accent-bg); box-shadow:0 0 16px var(--accent-glow);
+    transform:scale(1.05);
+  }
+  .cmc.on::after {
+    content:''; position:absolute; inset:-3px; border-radius:calc(var(--radius) + 2px);
+    border:2px solid var(--accent); opacity:.3; pointer-events:none;
+  }
+
+  /* High CMC toggle */
+  .cmc-more-toggle {
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 0 4px; color:var(--text-faint); font-size:13px;
+    cursor:pointer; transition:color .15s; user-select:none;
+    font-family:'Cinzel',serif; letter-spacing:1px;
+  }
+  .cmc-more-toggle:hover { color:var(--text-dim); }
+  .cmc-more-toggle .arrow { transition:transform .2s; display:inline-block; }
+  .cmc-more-toggle.open .arrow { transform:rotate(180deg); }
+  .cmc-high { display:none; padding-top:8px; }
+  .cmc-high.show { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; padding:8px 4px 0; animation:slideDown .2s ease; }
+  .cmc-high .cmc { font-size:15px; }
+
+  /* Sticky bottom bar */
+  .summon-bar {
+    position:fixed; bottom:0; left:0; right:0; z-index:50;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:var(--bg); border-top:1px solid var(--border);
+    transition:background var(--t), border-color var(--t);
+    display:flex; justify-content:center;
+  }
+  .summon-bar::before {
+    content:''; position:absolute; top:-20px; left:0; right:0; height:20px;
+    background:linear-gradient(to top, var(--bg), transparent); pointer-events:none;
+  }
+  .summon-bar .btn { width:100%; max-width:440px; padding:16px 28px; font-size:16px; }
+
+  /* ── Status card ── */
+  .status-card {
+    margin:16px 0; padding:20px; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--surface);
+    text-align:center; transition:all .3s;
+    animation:fadeUp .3s ease;
+  }
+  .status-card.printing {
+    border-color:var(--accent-border); background:var(--status-bg);
+    animation:fadeUp .3s ease, summonFlash 1.5s ease infinite;
+  }
+  .status-card.done { border-color:var(--accent-border); background:var(--status-bg); }
+  .status-card.fail { border-color:rgba(224,96,96,.2); background:var(--fail-bg); }
+  .status-card .status-icon { font-size:24px; margin-bottom:8px; display:block; }
+  .status-card .status-msg { font-size:15px; color:var(--text-mid); }
+  .status-card .status-msg.fail-text { color:var(--fail); }
+  .status-card .card-name {
+    font-family:'Cinzel',serif; font-weight:700; font-size:19px; color:var(--text);
+    display:block; margin-top:8px; line-height:1.3;
+  }
+  .status-card .card-sub {
+    font-size:14px; color:var(--text-dim); margin-top:4px; display:block;
+  }
+  .status-card .peek-btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    margin-top:14px; padding:8px 20px; border-radius:8px;
+    border:1px solid var(--border); background:var(--surface2);
+    color:var(--text-mid); font-size:14px; cursor:pointer; transition:all .15s;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+  }
+  .status-card .peek-btn:hover { border-color:var(--accent-border); color:var(--accent); }
+  .spinner { display:inline-block; width:20px; height:20px; border:2px solid var(--spinner-track); border-top-color:var(--accent); border-radius:50%; animation:spin .5s linear infinite; vertical-align:middle; }
+  .spinner-lg { width:28px; height:28px; }
+  .shimmer-text {
+    background:linear-gradient(90deg, var(--text-dim) 0%, var(--accent) 50%, var(--text-dim) 100%);
+    background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; animation:shimmer 2s ease infinite;
+  }
+
+  /* ══════════════════════════════════════════
+     LOG / BATTLEFIELD
+  ══════════════════════════════════════════ */
+  .log-empty {
+    text-align:center; color:var(--text-faint); padding:48px 20px;
+    font-style:italic; font-size:16px;
+  }
+  .log-item {
+    display:flex; align-items:center; gap:12px; padding:14px 0;
+    border-bottom:1px solid var(--border); transition:border-color var(--t);
+  }
+  .log-item:last-child { border-bottom:none; }
+  .log-mana {
+    width:38px; height:38px; border-radius:50%; flex-shrink:0;
+    background:var(--surface); border:1.5px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Cinzel',serif; font-size:14px; font-weight:700; color:var(--accent);
+    transition:all var(--t);
+  }
+  .log-info { flex:1; min-width:0; }
+  .log-name {
+    font-size:16px; font-weight:600; color:var(--text);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .log-type {
+    font-size:13px; color:var(--text-dim); margin-top:2px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .log-pt {
+    font-size:15px; color:var(--accent); font-family:'Cinzel',serif;
+    font-weight:700; flex-shrink:0; padding:0 4px;
+  }
+  .log-actions { display:flex; gap:4px; flex-shrink:0; }
+  .log-peek, .log-reprint {
+    width:36px; height:36px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-dim); font-size:16px;
+    cursor:pointer; transition:all .15s;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .log-peek:hover, .log-reprint:hover { border-color:var(--accent-border); color:var(--accent); background:var(--accent-bg); }
+  .log-peek:active, .log-reprint:active { transform:scale(.93); }
+
+  /* ── Peek overlay ── */
+  .peek-overlay {
+    position:fixed; inset:0; z-index:999; background:var(--peek-bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px;
+    animation:fadeUp .2s ease;
+  }
+  .peek-overlay img {
+    max-width:340px; width:100%; border-radius:14px;
+    box-shadow:0 12px 48px rgba(0,0,0,.5); pointer-events:none;
+    transition:transform .4s ease;
+  }
+  .peek-overlay img.flipping { transform:rotateY(90deg); }
+  .peek-controls {
+    display:flex; gap:10px; margin-top:16px;
+  }
+  .peek-ctrl-btn {
+    padding:10px 24px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.1); color:#fff; font-size:15px;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:6px;
+  }
+  .peek-ctrl-btn:hover { background:rgba(255,255,255,.2); }
+  .peek-ctrl-btn:active { transform:scale(.95); }
+  .dfc-badge {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:20px; height:20px; border-radius:4px; font-size:11px;
+    background:var(--accent-bg); border:1px solid var(--accent-border); color:var(--accent);
+    flex-shrink:0; margin-left:2px;
+  }
+
+  /* ══════════ PRINT ══════════ */
+  #print-zone { display:none; }
+
+  @media print {
+    * {
+      background: transparent !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+    }
+
+    html,body {
+      background:#fff!important;
+      color:#000!important;
+      margin:0!important;
+      padding:0!important;
+      min-height:0!important;
+      overflow:visible!important;
+      width:100%!important;
+    }
+
+    body::before { display:none!important; }
+
+    .app,
+    .summon-bar {
+      display:none!important;
+    }
+
+    #print-zone {
+      display:block!important;
+      margin:0!important;
+      padding:0!important;
+      overflow:visible!important;
+      width:100%!important;
+    }
+
+    #print-zone .r-img {
+      filter:none!important;
+      -webkit-filter:none!important;
+    }
+
+    .receipt {
+      width:100%;
+      margin:0 0 2mm 0!important;
+      padding:0!important;
+      text-align:center;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .receipt:last-child {
+      margin-bottom:0!important;
+    }
+  }
+
+  .receipt {
+    width:100%;
+    margin:0 0 2mm 0;
+    padding:0;
+    text-align:center;
+  }
+  .receipt .r-img {
+    display:block; margin:0 auto; padding:0; border-radius:0;
+    width:100%; max-width:63mm; height:auto;
+    image-rendering:pixelated;
+  }
+  .receipt .r-sep { margin:2mm auto 0; width:100%; max-width:63mm; border-top:3px dashed #000; }
+</style>
+</head>
+<body>
+
+<div id="print-zone"></div>
+
+<div class="app">
+
+  <!-- ═══════════════════ HOME ═══════════════════ -->
+  <div id="s-home" class="screen active">
+    <div class="header">
+      <div class="header-title">Momir Papir</div>
+      <div class="header-actions">
+        <div id="nav-home"></div>
+        <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme"></button>
+      </div>
+    </div>
+
+    <div class="card-frame" id="momir-frame">
+      <div style="color:var(--text-faint);font-size:15px;padding:48px 0;">
+        <span class="spinner"></span>
+      </div>
+    </div>
+
+    <div class="btn-row" style="flex-direction:column;gap:10px;padding:24px 0;">
+      <button class="btn btn-primary" style="width:100%" onclick="go('play')">Start Game</button>
+      <div class="emblem-row">
+        <button class="btn btn-secondary" style="flex:1" onclick="printEmblems()">Print Emblems</button>
+        <div class="copies-stepper">
+          <button class="stepper-btn" onclick="adjustCopies(-1)">−</button>
+          <span class="stepper-val" id="copies-val">1</span>
+          <button class="stepper-btn" onclick="adjustCopies(1)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="rules-text">
+      Each player starts with <strong>24 life</strong> and a 60-card deck of basic lands.
+      Once per turn, as a sorcery: pay <strong>{X}</strong>, discard a card, and create a token copy of a random creature with mana value X.
+    </div>
+  </div>
+
+  <!-- ═══════════════════ PLAY ═══════════════════ -->
+  <div id="s-play" class="screen">
+    <div class="header">
+      <div class="header-title">Momir Papir</div>
+      <div class="header-actions">
+        <button class="badge-btn" id="log-btn" onclick="go('log')" style="display:none;">
+          Battlefield <span class="badge-count" id="log-count">0</span>
+        </button>
+        <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme"></button>
+        <button class="icon-btn" onclick="go('home')" title="Back to setup" style="font-size:18px;">✕</button>
+      </div>
+    </div>
+
+    <div class="play-body">
+      <div class="cmc-section">
+        <div class="section-label">Mana Value</div>
+        <div class="cmc-grid" id="cmc-grid"></div>
+        <div class="cmc-more-toggle" id="cmc-more-toggle" onclick="toggleHighCMC()">
+          <span>9 – 16</span>
+          <span class="arrow">▾</span>
+        </div>
+        <div class="cmc-high" id="cmc-high"></div>
+      </div>
+
+      <div id="status-area"></div>
+    </div>
+
+    <div class="summon-bar" id="summon-bar" style="display:none;">
+      <button id="summon-btn" class="btn btn-primary" onclick="summon()"     --overlay:rgba(240,236,230,.5);
+    --texture:url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.025'/%3E%3C/svg%3E");
+  }
+
+  html, body {
+    min-height:100dvh; background:var(--bg); color:var(--text);
+    font-family:'Cormorant Garamond',Georgia,serif; overflow-x:hidden;
+    -webkit-tap-highlight-color:transparent; transition:background var(--t), color var(--t);
+  }
+  body::before {
+    content:''; position:fixed; inset:0; background:var(--texture); pointer-events:none; z-index:0;
+  }
+
+  .app { position:relative; z-index:1; max-width:440px; margin:0 auto; padding:0 16px 32px; }
+  .screen { display:none; }
+  .screen.active { display:flex; flex-direction:column; }
+
+  @keyframes fadeUp { from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)} }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  @keyframes pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
+  @keyframes summonFlash { 0%{box-shadow:0 0 0 0 var(--accent-glow)} 50%{box-shadow:0 0 0 20px transparent} 100%{box-shadow:0 0 0 0 transparent} }
+  @keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+  @keyframes slideDown { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+
+  /* ── Header ── */
+  .header {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:16px 0; position:sticky; top:0; z-index:10;
+    background:var(--bg); transition:background var(--t);
+  }
+  .header::after {
+    content:''; position:absolute; bottom:0; left:-16px; right:-16px; height:1px;
+    background:var(--border); transition:background var(--t);
+  }
+  .header-title {
+    font-family:'Cinzel',serif; font-size:14px; font-weight:700;
+    color:var(--text-dim); letter-spacing:5px; text-transform:uppercase; transition:color var(--t);
+  }
+  .header-actions { display:flex; gap:8px; align-items:center; }
+
+  /* ── Icon buttons ── */
+  .icon-btn {
+    width:36px; height:36px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-dim); font-size:15px;
+    cursor:pointer; transition:all .15s; display:flex; align-items:center; justify-content:center;
+  }
+  .icon-btn:hover { border-color:var(--border-hover); color:var(--text); background:var(--surface2); }
+  .icon-btn:active { transform:scale(.95); }
+
+  /* ── Badge button (e.g. Battlefield) ── */
+  .badge-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 14px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-mid); font-size:13px;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+    cursor:pointer; transition:all .15s; white-space:nowrap;
+  }
+  .badge-btn:hover { border-color:var(--border-hover); color:var(--text); }
+  .badge-btn:active { transform:scale(.97); }
+  .badge-btn .badge-count {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:20px; height:20px; border-radius:10px; padding:0 6px;
+    background:var(--accent); color:var(--accent-text);
+    font-family:'Cinzel',serif; font-size:10px; font-weight:700;
+  }
+
+  /* ── Card Frame ── */
+  .card-frame { text-align:center; padding:24px 0 16px; }
+  .card-frame img {
+    width:100%; max-width:280px; border-radius:14px;
+    box-shadow:0 12px 40px var(--card-shadow), 0 2px 8px var(--card-shadow);
+    transition:box-shadow var(--t);
+  }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-family:'Cinzel',serif; font-size:11px; font-weight:700;
+    color:var(--text-faint); letter-spacing:3px; text-transform:uppercase;
+    padding:4px 0 12px; transition:color var(--t);
+  }
+
+  /* ── Primary / Ghost buttons ── */
+  .btn {
+    cursor:pointer; border:none; outline:none; font-family:'Cinzel',serif;
+    font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+    padding:14px 28px; border-radius:var(--radius); font-size:15px; transition:all .2s;
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn:active:not(:disabled) { transform:scale(.97); }
+  .btn:disabled { opacity:.3; cursor:not-allowed; }
+  .btn-primary {
+    background:var(--accent); color:var(--accent-text);
+    box-shadow:0 2px 16px var(--accent-glow), 0 1px 3px rgba(0,0,0,.2);
+  }
+  .btn-primary:hover:not(:disabled) { filter:brightness(1.1); box-shadow:0 4px 24px var(--accent-glow); }
+  .btn-secondary {
+    background:var(--surface); color:var(--text-mid); border:1px solid var(--border);
+    box-shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  .btn-secondary:hover:not(:disabled) { color:var(--text); border-color:var(--border-hover); background:var(--surface2); }
+  .btn-ghost { background:none; color:var(--text-dim); padding:10px 16px; letter-spacing:1px; font-size:13px; }
+  .btn-ghost:hover { color:var(--text); }
+  .btn-row { display:flex; gap:10px; justify-content:center; padding:20px 0; }
+  .emblem-row { display:flex; gap:8px; align-items:stretch; }
+  .copies-stepper {
+    display:flex; align-items:center; gap:0; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--surface); overflow:hidden; flex-shrink:0;
+  }
+  .stepper-btn {
+    width:40px; height:100%; border:none; background:none; color:var(--text-mid);
+    font-size:20px; font-weight:700; cursor:pointer; transition:all .15s;
+    display:flex; align-items:center; justify-content:center; font-family:'Cinzel',serif;
+  }
+  .stepper-btn:active { background:var(--surface2); transform:scale(.93); }
+  .stepper-btn:hover { color:var(--text); }
+  .stepper-val {
+    width:32px; text-align:center; font-family:'Cinzel',serif; font-size:16px;
+    font-weight:700; color:var(--accent); user-select:none;
+  }
+
+  /* ── Rules ── */
+  .rules-text {
+    color:var(--text-dim); font-size:15px; line-height:1.7; text-align:center;
+    padding:16px 12px; transition:color var(--t);
+  }
+  .rules-text strong { color:var(--text-mid); font-weight:600; }
+
+  /* ══════════════════════════════════════════
+     PLAY SCREEN
+  ══════════════════════════════════════════ */
+  .play-body { flex:1; padding-top:16px; padding-bottom:140px; }
+
+  /* CMC Grid */
+  .cmc-section { padding:8px 0 0; }
+  .cmc-grid {
+    display:grid; grid-template-columns:repeat(5,1fr); gap:8px;
+    padding:0 4px;
+  }
+  .cmc {
+    aspect-ratio:1; border-radius:var(--radius); border:1.5px solid var(--border);
+    background:var(--surface); color:var(--text-mid);
+    font-family:'Cinzel',serif; font-size:18px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .15s; user-select:none;
+    -webkit-user-select:none; position:relative;
+  }
+  .cmc:active { transform:scale(.93); }
+  .cmc:hover { border-color:var(--border-hover); color:var(--text); }
+  .cmc.on {
+    border-color:var(--accent); color:var(--accent);
+    background:var(--accent-bg); box-shadow:0 0 16px var(--accent-glow);
+    transform:scale(1.05);
+  }
+  .cmc.on::after {
+    content:''; position:absolute; inset:-3px; border-radius:calc(var(--radius) + 2px);
+    border:2px solid var(--accent); opacity:.3; pointer-events:none;
+  }
+
+  /* High CMC toggle */
+  .cmc-more-toggle {
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 0 4px; color:var(--text-faint); font-size:13px;
+    cursor:pointer; transition:color .15s; user-select:none;
+    font-family:'Cinzel',serif; letter-spacing:1px;
+  }
+  .cmc-more-toggle:hover { color:var(--text-dim); }
+  .cmc-more-toggle .arrow { transition:transform .2s; display:inline-block; }
+  .cmc-more-toggle.open .arrow { transform:rotate(180deg); }
+  .cmc-high { display:none; padding-top:8px; }
+  .cmc-high.show { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; padding:8px 4px 0; animation:slideDown .2s ease; }
+  .cmc-high .cmc { font-size:15px; }
+
+  /* Sticky bottom bar */
+  .summon-bar {
+    position:fixed; bottom:0; left:0; right:0; z-index:50;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:var(--bg); border-top:1px solid var(--border);
+    transition:background var(--t), border-color var(--t);
+    display:flex; justify-content:center;
+  }
+  .summon-bar::before {
+    content:''; position:absolute; top:-20px; left:0; right:0; height:20px;
+    background:linear-gradient(to top, var(--bg), transparent); pointer-events:none;
+  }
+  .summon-bar .btn { width:100%; max-width:440px; padding:16px 28px; font-size:16px; }
+
+  /* ── Status card ── */
+  .status-card {
+    margin:16px 0; padding:20px; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--surface);
+    text-align:center; transition:all .3s;
+    animation:fadeUp .3s ease;
+  }
+  .status-card.printing {
+    border-color:var(--accent-border); background:var(--status-bg);
+    animation:fadeUp .3s ease, summonFlash 1.5s ease infinite;
+  }
+  .status-card.done { border-color:var(--accent-border); background:var(--status-bg); }
+  .status-card.fail { border-color:rgba(224,96,96,.2); background:var(--fail-bg); }
+  .status-card .status-icon { font-size:24px; margin-bottom:8px; display:block; }
+  .status-card .status-msg { font-size:15px; color:var(--text-mid); }
+  .status-card .status-msg.fail-text { color:var(--fail); }
+  .status-card .card-name {
+    font-family:'Cinzel',serif; font-weight:700; font-size:19px; color:var(--text);
+    display:block; margin-top:8px; line-height:1.3;
+  }
+  .status-card .card-sub {
+    font-size:14px; color:var(--text-dim); margin-top:4px; display:block;
+  }
+  .status-card .peek-btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    margin-top:14px; padding:8px 20px; border-radius:8px;
+    border:1px solid var(--border); background:var(--surface2);
+    color:var(--text-mid); font-size:14px; cursor:pointer; transition:all .15s;
+    font-family:'Cormorant Garamond',serif; font-weight:600;
+  }
+  .status-card .peek-btn:hover { border-color:var(--accent-border); color:var(--accent); }
+  .spinner { display:inline-block; width:20px; height:20px; border:2px solid var(--spinner-track); border-top-color:var(--accent); border-radius:50%; animation:spin .5s linear infinite; vertical-align:middle; }
+  .spinner-lg { width:28px; height:28px; }
+  .shimmer-text {
+    background:linear-gradient(90deg, var(--text-dim) 0%, var(--accent) 50%, var(--text-dim) 100%);
+    background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; animation:shimmer 2s ease infinite;
+  }
+
+  /* ══════════════════════════════════════════
+     LOG / BATTLEFIELD
+  ══════════════════════════════════════════ */
+  .log-empty {
+    text-align:center; color:var(--text-faint); padding:48px 20px;
+    font-style:italic; font-size:16px;
+  }
+  .log-item {
+    display:flex; align-items:center; gap:12px; padding:14px 0;
+    border-bottom:1px solid var(--border); transition:border-color var(--t);
+  }
+  .log-item:last-child { border-bottom:none; }
+  .log-mana {
+    width:38px; height:38px; border-radius:50%; flex-shrink:0;
+    background:var(--surface); border:1.5px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Cinzel',serif; font-size:14px; font-weight:700; color:var(--accent);
+    transition:all var(--t);
+  }
+  .log-info { flex:1; min-width:0; }
+  .log-name {
+    font-size:16px; font-weight:600; color:var(--text);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .log-type {
+    font-size:13px; color:var(--text-dim); margin-top:2px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .log-pt {
+    font-size:15px; color:var(--accent); font-family:'Cinzel',serif;
+    font-weight:700; flex-shrink:0; padding:0 4px;
+  }
+  .log-actions { display:flex; gap:4px; flex-shrink:0; }
+  .log-peek, .log-reprint {
+    width:36px; height:36px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-dim); font-size:16px;
+    cursor:pointer; transition:all .15s;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .log-peek:hover, .log-reprint:hover { border-color:var(--accent-border); color:var(--accent); background:var(--accent-bg); }
+  .log-peek:active, .log-reprint:active { transform:scale(.93); }
+
+  /* ── Peek overlay ── */
+  .peek-overlay {
+    position:fixed; inset:0; z-index:999; background:var(--peek-bg);
     display:flex; align-items:center; justify-content:center; padding:20px;
     cursor:pointer; animation:fadeUp .2s ease;
   }
