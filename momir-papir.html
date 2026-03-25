@@ -153,6 +153,21 @@
     width:32px; text-align:center; font-family:'Cinzel',serif; font-size:16px;
     font-weight:700; color:var(--accent); user-select:none;
   }
+  .setup-row {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 0; border-bottom:1px solid var(--border); transition:border-color var(--t);
+  }
+  .setup-label { color:var(--text-mid); font-size:15px; font-weight:600; transition:color var(--t); }
+  .toggle-group { display:flex; gap:4px; }
+  .toggle-btn {
+    padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface);
+    color:var(--text-dim); font-size:14px; font-weight:600; cursor:pointer; transition:all .15s;
+    font-family:'Cormorant Garamond',serif;
+  }
+  .toggle-btn:active { transform:scale(.95); }
+  .toggle-btn.on {
+    border-color:var(--accent-border); color:var(--accent); background:var(--accent-bg);
+  }
 
   /* ── Rules ── */
   .rules-text {
@@ -393,10 +408,10 @@
   }
   .receipt .r-img {
     display:block; margin:0 auto; padding:0; border-radius:0;
-    width:100%; max-width:63mm; height:auto;
+    width:100%; height:auto;
     image-rendering:pixelated;
   }
-  .receipt .r-sep { margin:2mm auto 0; width:100%; max-width:63mm; border-top:3px dashed #000; }
+  .receipt .r-sep { margin:2mm auto 0; width:100%; border-top:3px dashed #000; }
 </style>
 </head>
 <body>
@@ -418,6 +433,15 @@
     <div class="card-frame" id="momir-frame">
       <div style="color:var(--text-faint);font-size:15px;padding:48px 0;">
         <span class="spinner"></span>
+      </div>
+    </div>
+
+    <div class="setup-row">
+      <div class="setup-label">Paper</div>
+      <div class="toggle-group" id="paper-btns">
+        <button class="toggle-btn on" onclick="setPaper('2in')">2″</button>
+        <button class="toggle-btn" onclick="setPaper('3in')">3″</button>
+        <button class="toggle-btn" onclick="setPaper('4in')">4″</button>
       </div>
     </div>
 
@@ -493,6 +517,32 @@ let momirImg = '', momirData = null;
 let turnNumber = 0, summoning = false;
 let highCMCOpen = false;
 let emblemCopies = 1;
+
+// At 8 dots/mm: card = 63mm = 504 dots.
+// Paper total widths determine canvas size.
+// On 2" the card is wider than the bed, so we just fill it.
+// On 3"/4" we dither card at 504px then pad with white to fill the paper.
+const PAPER = {
+  '2in': { total: 384 },   // ~48mm printable
+  '3in': { total: 576 },   // ~72mm printable
+  '4in': { total: 832 },   // ~104mm printable
+};
+const CARD_W = 504; // 63mm × 8 dots/mm
+let paperKey = '2in';
+
+function setPaper(key) {
+  paperKey = key;
+  document.querySelectorAll('#paper-btns .toggle-btn').forEach(b =>
+    b.classList.toggle('on', b.textContent.includes(key.charAt(0)))
+  );
+  try { localStorage.setItem('momir-paper', key); } catch(e) {}
+}
+(function() {
+  try {
+    const s = localStorage.getItem('momir-paper');
+    if (PAPER[s]) setPaper(s);
+  } catch(e) {}
+})();
 
 function adjustCopies(d) {
   emblemCopies = Math.max(1, Math.min(10, emblemCopies + d));
@@ -695,13 +745,17 @@ function ditherImage(imgUrl) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const W = 503;
-      const H = Math.round((img.naturalHeight / img.naturalWidth) * W);
-      const cv = document.createElement('canvas');
-      cv.width = W; cv.height = H;
-      const ctx = cv.getContext('2d');
-      ctx.drawImage(img, 0, 0, W, H);
-      const imageData = ctx.getImageData(0, 0, W, H);
+      const paper = PAPER[paperKey].total;
+      // Card dither width: real MTG card (504px) or paper width if smaller
+      const cardW = Math.min(CARD_W, paper);
+      const cardH = Math.round((img.naturalHeight / img.naturalWidth) * cardW);
+
+      // Dither the card onto a card-sized canvas
+      const cardCv = document.createElement('canvas');
+      cardCv.width = cardW; cardCv.height = cardH;
+      const cardCtx = cardCv.getContext('2d');
+      cardCtx.drawImage(img, 0, 0, cardW, cardH);
+      const imageData = cardCtx.getImageData(0, 0, cardW, cardH);
       const d = imageData.data;
 
       const gamma = 0.82, brightness = 5;
@@ -712,21 +766,34 @@ function ditherImage(imgUrl) {
         d[i] = d[i+1] = d[i+2] = g;
       }
 
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          const idx = (y*W+x)*4;
+      for (let y = 0; y < cardH; y++) {
+        for (let x = 0; x < cardW; x++) {
+          const idx = (y*cardW+x)*4;
           const old = d[idx];
           const nw = old < 120 ? 0 : 255;
           d[idx] = d[idx+1] = d[idx+2] = nw;
           const err = old - nw;
-          if (x+1<W)             d[idx+4]       += err*7/16;
-          if (y+1<H && x>0)     d[idx+W*4-4]   += err*3/16;
-          if (y+1<H)            d[idx+W*4]     += err*5/16;
-          if (y+1<H && x+1<W)  d[idx+W*4+4]   += err*1/16;
+          if (x+1<cardW)             d[idx+4]         += err*7/16;
+          if (y+1<cardH && x>0)     d[idx+cardW*4-4]  += err*3/16;
+          if (y+1<cardH)            d[idx+cardW*4]    += err*5/16;
+          if (y+1<cardH && x+1<cardW) d[idx+cardW*4+4]+= err*1/16;
         }
       }
-      ctx.putImageData(imageData, 0, 0);
-      resolve(cv.toDataURL('image/png'));
+      cardCtx.putImageData(imageData, 0, 0);
+
+      // If paper is wider than the card, pad with white and center
+      if (paper > cardW) {
+        const padL = Math.round((paper - cardW) / 2);
+        const outCv = document.createElement('canvas');
+        outCv.width = paper; outCv.height = cardH;
+        const outCtx = outCv.getContext('2d');
+        outCtx.fillStyle = '#fff';
+        outCtx.fillRect(0, 0, paper, cardH);
+        outCtx.drawImage(cardCv, padL, 0);
+        resolve(outCv.toDataURL('image/png'));
+      } else {
+        resolve(cardCv.toDataURL('image/png'));
+      }
     };
     img.onerror = () => reject(new Error('Image load failed'));
     img.src = imgUrl;
