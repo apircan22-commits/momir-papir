@@ -706,12 +706,46 @@ async function summon() {
   updateSummon();
 }
 
+// Parse mana cost string like "{2}{W}" into CMC number
+function parseCMC(manaCost) {
+  if (!manaCost) return 0;
+  let total = 0;
+  const symbols = manaCost.match(/\{[^}]+\}/g) || [];
+  for (const sym of symbols) {
+    const inner = sym.slice(1, -1);
+    if (/^\d+$/.test(inner)) total += parseInt(inner);
+    else if (inner === 'X') {} // X counts as 0
+    else total += 1; // any colored/hybrid symbol = 1
+  }
+  return total;
+}
+
 async function processCard(card) {
   const sa = document.getElementById('status-area');
   turnNumber++;
-  const isDFC = !card.image_uris && card.card_faces?.length >= 2;
-  const imgUrl = card.image_uris?.normal || card.card_faces?.[0]?.image_uris?.normal || '';
-  const imgLg = card.image_uris?.large || card.card_faces?.[0]?.image_uris?.large || imgUrl;
+  const hasFaces = !card.image_uris && card.card_faces?.length >= 2;
+  const isDFC = hasFaces && card.layout === 'transform';
+
+  // For MDFCs/non-transform: find the correct creature face
+  let primaryFace = 0;
+  if (hasFaces && !isDFC) {
+    const creatureFaces = card.card_faces
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => f.type_line && f.type_line.toLowerCase().includes('creature'));
+
+    if (creatureFaces.length === 1) {
+      // Only one creature face — use it (e.g. Selfless Glyphweaver)
+      primaryFace = creatureFaces[0].i;
+    } else if (creatureFaces.length > 1) {
+      // Both faces are creatures (e.g. Plargg // Augusta)
+      // Pick the one whose mana cost matches the summoned MV
+      const match = creatureFaces.find(({ f }) => parseCMC(f.mana_cost) === cmc);
+      primaryFace = match ? match.i : creatureFaces[0].i;
+    }
+  }
+
+  const imgUrl = card.image_uris?.normal || card.card_faces?.[primaryFace]?.image_uris?.normal || '';
+  const imgLg = card.image_uris?.large || card.card_faces?.[primaryFace]?.image_uris?.large || imgUrl;
   const img2 = isDFC ? (card.card_faces[1].image_uris?.normal || '') : '';
   const imgLg2 = isDFC ? (card.card_faces[1].image_uris?.large || img2) : '';
   log.unshift({ turn:turnNumber, name:card.name, type:card.type_line, power:card.power, toughness:card.toughness, cmc, img:imgUrl, imgLg, img2, imgLg2, isDFC, ts:Date.now() });
@@ -831,29 +865,37 @@ async function waitForPrintImages(root) {
   }));
 }
 
-function doPrint(opts) {
-  let s = document.getElementById('dynamic-page-style');
-
-  if (!s) {
-    s = document.createElement('style');
-    s.id = 'dynamic-page-style';
-    document.head.appendChild(s);
-  }
-
-  // Force page-break after EVERY receipt (including last).
-  // Add @page bottom margin so the printer must advance past the card.
-  s.textContent = `
-    @page { margin: 0 0 50mm 0; }
-    .receipt {
-      break-after:page;
-      page-break-after:always;
+function doPrint() {
+  return new Promise(resolve => {
+    let s = document.getElementById('dynamic-page-style');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'dynamic-page-style';
+      document.head.appendChild(s);
     }
-  `;
+    s.textContent = `
+      @page { margin: 0 0 50mm 0; }
+      .receipt {
+        break-after:page;
+        page-break-after:always;
+      }
+    `;
 
-  requestAnimationFrame(() => {
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      window.removeEventListener('afterprint', finish);
+      setTimeout(() => { s.textContent = ''; }, 500);
+      resolve();
+    };
+    window.addEventListener('afterprint', finish);
+    setTimeout(finish, 5000);
+
     requestAnimationFrame(() => {
-      window.print();
-      setTimeout(() => { s.textContent = ''; }, 2000);
+      requestAnimationFrame(() => {
+        window.print();
+      });
     });
   });
 }
@@ -867,7 +909,7 @@ async function autoPrint(imgUrl) {
     z.innerHTML = receiptHtml('<img class="r-img" crossorigin="anonymous" src="' + imgUrl + '" style="filter:grayscale(1) brightness(1.3);">');
   }
   await waitForPrintImages(z);
-  doPrint();
+  await doPrint();
 }
 
 // ── Log ──
@@ -946,16 +988,20 @@ async function reprint(idx) {
 }
 
 async function autoPrintDFC(frontUrl, backUrl) {
-  // Print each face as a SEPARATE print job — avoids last-page cutoff
-  await autoPrint(frontUrl);
-  // Wait for user to dismiss print dialog / printer to finish
-  await new Promise(r => {
-    const done = () => { window.removeEventListener('afterprint', done); r(); };
-    window.addEventListener('afterprint', done);
-    // Fallback in case afterprint doesn't fire
-    setTimeout(r, 3000);
-  });
-  await autoPrint(backUrl);
+  const z = document.getElementById('print-zone');
+  let h = '';
+  try {
+    const ditheredFront = await ditherImage(frontUrl);
+    const ditheredBack = await ditherImage(backUrl);
+    h = receiptHtml('<img class="r-img" src="' + ditheredFront + '">') +
+        receiptHtml('<img class="r-img" src="' + ditheredBack + '">');
+  } catch(e) {
+    h = receiptHtml('<img class="r-img" crossorigin="anonymous" src="' + frontUrl + '" style="filter:grayscale(1) brightness(1.3);">') +
+        receiptHtml('<img class="r-img" crossorigin="anonymous" src="' + backUrl + '" style="filter:grayscale(1) brightness(1.3);">');
+  }
+  z.innerHTML = h;
+  await waitForPrintImages(z);
+  await doPrint();
 }
 
 // ── Emblem printing ──
@@ -977,7 +1023,7 @@ async function printEmblems() {
     z.innerHTML = h;
   }
   await waitForPrintImages(z);
-  doPrint();
+  await doPrint();
 }
 
 function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
